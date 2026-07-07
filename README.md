@@ -7,9 +7,10 @@ implementation is written in Julia and lives at
 information on the solver is available at
 <https://ece.uwaterloo.ca/~sl2smith/GLNS/>.
 
-**Status: work in progress.** The core solver and command-line interface are
-complete and validated against the Julia implementation on the GTSPLIB
-benchmark set. A C API and Python bindings are planned.
+**Status: work in progress.** The core solver, command-line interface,
+C API, and Python bindings are complete; the solver is validated against the
+Julia implementation on the GTSPLIB benchmark set (see `docs/`). Prebuilt
+wheels and CI are planned.
 
 ## Citing this work
 
@@ -89,6 +90,56 @@ params.seed = 42;          // omit for a nondeterministic run
 
 glns::Solution solution = glns::solve(instance, params);
 // solution.tour (0-indexed, one vertex per set), solution.cost, ...
+```
+
+## Python
+
+Install from the repository root (requires CMake >= 3.18 and a C++17
+compiler; published wheels will remove this requirement):
+
+```bash
+pip install .
+```
+
+```python
+import numpy as np
+import glns
+
+# from a GTSPLIB file
+sol = glns.solve_file("examples/39rat195.gtsp", seed=42)
+
+# ... or in memory: integer cost matrix + sets partitioning the vertices
+dist = np.array([[0, 3, 4, 7], [3, 0, 6, 5], [4, 6, 0, 4], [7, 5, 4, 0]])
+sol = glns.solve(dist, [[0, 1], [2], [3]], mode="default", seed=42)
+
+sol.tour        # one 0-indexed vertex per set, in visit order
+sol.cost        # tour cost
+sol.solve_time  # seconds; the GIL is released while solving
+```
+
+All solver options (`mode`, `trials`, `restarts`, `max_time`,
+`num_iterations`, `budget`, `seed`, `verbose`, ...) are keyword arguments
+with the same defaults as the Julia implementation. Costs must be integers;
+scale and round floating-point costs first.
+
+## C API
+
+`include/glns/glns.h` exposes the solver to C and to anything with a C FFI
+(MATLAB, Rust, Go, Java, ...). See `tests/test_c_api.c` for a complete
+example:
+
+```c
+glns_params params;
+glns_params_init(&params);
+params.seed = 42; params.has_seed = 1;
+
+glns_solution solution;
+char err[256];
+if (glns_solve(n, m, dist, set_sizes, set_vertices, &params,
+               &solution, err, sizeof err) == 0) {
+    /* solution.tour[0..tour_len), solution.cost */
+    glns_solution_free(&solution);
+}
 ```
 
 ## Relation to the Julia implementation
