@@ -23,6 +23,11 @@ target_include_directories(glns_core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+# no fused multiply-add: TSPLIB coordinate distances must round identically
+# to the Julia reference implementation (floor(x + 0.5) sits on ulp boundaries)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(glns_core PRIVATE -ffp-contract=off)
+endif()
 
 add_executable(glns_cli cli/main.cpp)
 target_link_libraries(glns_cli PRIVATE glns_core)

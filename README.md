@@ -42,8 +42,12 @@ ctest --test-dir build
 Or directly, without CMake:
 
 ```bash
-clang++ -std=c++17 -O2 -Iinclude -Isrc src/*.cpp cli/main.cpp -o glns
+clang++ -std=c++17 -O2 -ffp-contract=off -Iinclude -Isrc src/*.cpp cli/main.cpp -o glns
 ```
+
+(`-ffp-contract=off` keeps TSPLIB coordinate-to-distance rounding identical
+to the Julia implementation; fused multiply-adds can shift a distance that
+lands exactly on a rounding boundary by one unit.)
 
 ## Command-line usage
 
