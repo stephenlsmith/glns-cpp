@@ -42,7 +42,7 @@ ctest --test-dir build
 Or directly, without CMake:
 
 ```bash
-clang++ -std=c++17 -O2 -ffp-contract=off -Iinclude -Isrc src/*.cpp cli/main.cpp -o glns
+clang++ -std=c++17 -O3 -ffp-contract=off -Iinclude -Isrc src/*.cpp cli/main.cpp -o glns
 ```
 
 (`-ffp-contract=off` keeps TSPLIB coordinate-to-distance rounding identical
@@ -79,7 +79,7 @@ glns::Instance instance = glns::read_instance("examples/39rat195.gtsp");
 // ... or build an instance in memory (0-indexed vertices)
 // glns::Instance instance;
 // instance.num_vertices = ...; instance.num_sets = ...;
-// instance.dist = glns::Matrix(n, 0);  instance.dist(i, j) = ...;
+// instance.dist = glns::Matrix(n, 0);  instance.dist.set(i, j, ...);
 // instance.sets = {{0, 1}, {2, 3}, ...};
 // instance.finalize();
 
@@ -105,6 +105,9 @@ Known intentional deviations:
 - An RNG seed can be supplied for reproducible runs.
 - The `LOWER_ROW` edge weight format is implemented correctly rather than
   ported from the (untested and broken) Julia branch.
+- Individual distances must fit in 32 bits (they are stored narrow to halve
+  the solver's cache footprint; arithmetic and tour costs are still 64-bit).
+  `Matrix::set` throws a clear error if a distance is out of range.
 
 ## License
 

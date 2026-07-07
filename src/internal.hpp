@@ -81,12 +81,13 @@ Config resolve_parameters(const Instance& inst, const Params& params);
 // ---------------------------------------------------------------------------
 // Set <-> vertex minimum distances (set_vertex_dist / Distsv in utilities.jl)
 
+// stored as 32 bits like Matrix; every entry is a real minimum distance
 struct Distsv {
     int num_sets = 0;
     int num_vertices = 0;
-    std::vector<Cost> set_vert;  // sv(s, v): min over u in s of dist(u, v)
-    std::vector<Cost> vert_set;  // vs(v, s): min over u in s of dist(v, u)
-    std::vector<Cost> min_sv;    // minsv(s, v): direction-agnostic minimum
+    std::vector<std::int32_t> set_vert;  // sv(s, v): min over u in s of dist(u, v)
+    std::vector<std::int32_t> vert_set;  // vs(v, s): min over u in s of dist(v, u)
+    std::vector<std::int32_t> min_sv;    // minsv(s, v): direction-agnostic minimum
 
     Cost sv(int s, int v) const { return set_vert[static_cast<std::size_t>(s) * num_vertices + v]; }
     Cost vs(int v, int s) const { return vert_set[static_cast<std::size_t>(v) * num_sets + s]; }
@@ -94,6 +95,24 @@ struct Distsv {
 };
 
 Distsv set_vertex_dist(const Matrix& dist, int num_sets, const std::vector<int>& member);
+
+// ---------------------------------------------------------------------------
+// Reusable scratch buffers threaded through the solver so the hot loop does
+// not allocate.  Buffers are only valid within one call; functions that use
+// one state it in their signature.
+
+struct Workspace {
+    std::vector<Cost> pdf_scratch;     // pdf_select's nth_element input
+    std::vector<Cost> removal_costs;   // worst_vertices output
+    std::vector<Cost> mindist;         // randpdf_insertion / distance_removal
+    std::vector<int> deleted_vertices; // distance_removal
+    std::vector<int> sets_to_insert;   // removal output -> insertion input
+    std::vector<int> tour_inds;        // insert_subset_lb / moveopt_rand
+    std::vector<int> prev;             // reopt_tour relaxation
+    std::vector<Cost> cost_to_come;    // reopt_tour relaxation
+    std::vector<int> rotated;          // reopt_tour rotated set order
+    std::vector<int> new_tour;         // reopt_tour result
+};
 
 // ---------------------------------------------------------------------------
 // Small inline utilities
@@ -187,15 +206,18 @@ void power_update(Powers& powers, const Config& config);
 // ---------------------------------------------------------------------------
 // Insertions, removals, initial tours (insertion_deletion.jl)
 
-Tour remove_insert(const Tour& current, const Matrix& dist, const std::vector<int>& member,
-                   const Distsv& setdist, std::vector<std::vector<int>>& sets, Powers& powers,
-                   const Config& config, Phase phase, Rng& rng);
+// performs the remove-insert step from `current` into the reusable `trial`
+void remove_insert(const Tour& current, Tour& trial, const Matrix& dist,
+                   const std::vector<int>& member, const Distsv& setdist,
+                   std::vector<std::vector<int>>& sets, Powers& powers, const Config& config,
+                   Phase phase, Workspace& ws, Rng& rng);
 
 Tour initial_tour(Tour& lowest, const Matrix& dist, std::vector<std::vector<int>>& sets,
                   const Distsv& setdist, int trial_num, const Config& config, Rng& rng);
 
 // pdf-biased index selection over integer weights (pdf_select in insertion_deletion.jl)
-int pdf_select(const std::vector<Cost>& weights, double power, Rng& rng);
+int pdf_select(const std::vector<Cost>& weights, double power, Rng& rng,
+               std::vector<Cost>& scratch);
 
 // ---------------------------------------------------------------------------
 // Tour optimizations (tour_optimizations.jl)
@@ -208,7 +230,7 @@ Cost insert_cost_lb(const std::vector<int>& tour, const Matrix& dist,
 
 void opt_cycle(Tour& current, const Matrix& dist, std::vector<std::vector<int>>& sets,
                const std::vector<int>& member, const Config& config, const Distsv& setdist,
-               bool partial, Rng& rng);
+               bool partial, Workspace& ws, Rng& rng);
 
 // ---------------------------------------------------------------------------
 // Printing (parse_print.jl output half)

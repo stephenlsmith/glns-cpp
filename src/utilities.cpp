@@ -10,6 +10,17 @@
 
 namespace glns {
 
+std::int32_t Matrix::checked(Cost value) {
+    if (value > std::numeric_limits<std::int32_t>::max() ||
+        value < std::numeric_limits<std::int32_t>::min()) {
+        throw std::runtime_error(
+            "distance " + std::to_string(value) +
+            " does not fit in 32 bits; scale the costs down (tour costs may "
+            "exceed 32 bits, individual distances may not)");
+    }
+    return static_cast<std::int32_t>(value);
+}
+
 void Instance::finalize() {
     if (static_cast<int>(sets.size()) != num_sets) {
         throw std::runtime_error("number of sets doesn't match num_sets");
@@ -78,26 +89,27 @@ int min_set(const std::vector<std::vector<int>>& sets) {
 
 Distsv set_vertex_dist(const Matrix& dist, int num_sets, const std::vector<int>& member) {
     const int numv = dist.size();
+    const std::int32_t sentinel = std::numeric_limits<std::int32_t>::max();
     Distsv d;
     d.num_sets = num_sets;
     d.num_vertices = numv;
-    d.set_vert.assign(static_cast<std::size_t>(num_sets) * numv, kMaxCost);
-    d.vert_set.assign(static_cast<std::size_t>(numv) * num_sets, kMaxCost);
-    d.min_sv.assign(static_cast<std::size_t>(num_sets) * numv, kMaxCost);
+    d.set_vert.assign(static_cast<std::size_t>(num_sets) * numv, sentinel);
+    d.vert_set.assign(static_cast<std::size_t>(numv) * num_sets, sentinel);
+    d.min_sv.assign(static_cast<std::size_t>(num_sets) * numv, sentinel);
 
-    auto set_vert = [&](int s, int v) -> Cost& {
+    auto set_vert = [&](int s, int v) -> std::int32_t& {
         return d.set_vert[static_cast<std::size_t>(s) * numv + v];
     };
-    auto vert_set = [&](int v, int s) -> Cost& {
+    auto vert_set = [&](int v, int s) -> std::int32_t& {
         return d.vert_set[static_cast<std::size_t>(v) * num_sets + s];
     };
-    auto min_sv = [&](int s, int v) -> Cost& {
+    auto min_sv = [&](int s, int v) -> std::int32_t& {
         return d.min_sv[static_cast<std::size_t>(s) * numv + v];
     };
 
     for (int i = 0; i < numv; ++i) {
         for (int j = 0; j < numv; ++j) {
-            const Cost c = dist(j, i);
+            const std::int32_t c = static_cast<std::int32_t>(dist(j, i));
             int set = member[j];
             if (c < set_vert(set, i)) set_vert(set, i) = c;   // set containing j -> i
             if (c < min_sv(set, i)) min_sv(set, i) = c;

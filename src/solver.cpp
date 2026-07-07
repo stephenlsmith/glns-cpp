@@ -43,6 +43,8 @@ Solution solve(const Instance& instance, const Params& params) {
     Tour lowest{{}, kMaxCost};
     const Distsv setdist = set_vertex_dist(dist, config.num_sets, membership);
     Powers powers = initialize_powers(config);
+    Workspace ws;
+    Tour current, trial;  // persistent buffers for the inner loop
 
     bool timeout = false;
     bool budget_met = false;
@@ -71,7 +73,8 @@ Solution solve(const Instance& instance, const Params& params) {
 
         while (count.warm_trial <= config.warm_trials) {
             std::int64_t iter_count = 1;
-            Tour current{best.tour, best.cost};
+            current.tour = best.tour;
+            current.cost = best.cost;
             double temperature =
                 1.442 * config.accept_percentage * static_cast<double>(best.cost);
             // accept a solution with 50% higher cost with 0.05% chance after num_iterations
@@ -94,17 +97,17 @@ Solution solve(const Instance& instance, const Params& params) {
                         static_cast<double>(config.num_iterations) / 2.0) {
                     phase = kMid;  // move to mid phase after half the iterations
                 }
-                Tour trial = remove_insert(current, dist, membership, setdist, sets, powers,
-                                           config, phase, rng);
+                remove_insert(current, trial, dist, membership, setdist, sets, powers,
+                              config, phase, ws, rng);
 
                 // decide whether or not to accept the trial
                 if (accepttrial_noparam(trial.cost, current.cost, config.prob_accept, rng) ||
                     accepttrial(trial.cost, current.cost, temperature, rng)) {
                     if (config.mode == "slow") {
                         opt_cycle(trial, dist, sets, membership, config, setdist,
-                                  /*partial=*/false, rng);
+                                  /*partial=*/false, ws, rng);
                     }
-                    current = trial;
+                    std::swap(current, trial);
                 }
                 if (current.cost < best.cost) {
                     count.latest_improvement = 1;
@@ -113,7 +116,7 @@ Solution solve(const Instance& instance, const Params& params) {
                         count.warm_trial = 1;
                     }
                     opt_cycle(current, dist, sets, membership, config, setdist,
-                              /*partial=*/false, rng);
+                              /*partial=*/false, ws, rng);
                     best = current;
                 } else {
                     count.latest_improvement += 1;

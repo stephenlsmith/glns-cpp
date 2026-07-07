@@ -174,14 +174,14 @@ Instance read_instance(const std::string& filename) {
                 for (const std::string& tok : tokens(line)) {
                     const Cost cost = to_int(tok);
                     if (data_format == "FULL_MATRIX") {
-                        dist(vid0, vid1) = cost;
+                        dist.set(vid0, vid1, cost);
                         if (++vid1 >= num_vertices) {
                             ++vid0;
                             vid1 = 0;
                         }
                     } else if (data_format == "LOWER_DIAG_ROW") {
-                        dist(vid0, vid1) = cost;
-                        dist(vid1, vid0) = cost;
+                        dist.set(vid0, vid1, cost);
+                        dist.set(vid1, vid0, cost);
                         if (++vid1 > vid0) {
                             ++vid0;
                             vid1 = 0;
@@ -189,23 +189,23 @@ Instance read_instance(const std::string& filename) {
                     } else if (data_format == "LOWER_ROW") {
                         // strict lower triangle, row by row starting at row 1
                         if (vid0 == 0) vid0 = 1;
-                        dist(vid0, vid1) = cost;
-                        dist(vid1, vid0) = cost;
+                        dist.set(vid0, vid1, cost);
+                        dist.set(vid1, vid0, cost);
                         if (++vid1 >= vid0) {
                             ++vid0;
                             vid1 = 0;
                         }
                     } else if (data_format == "UPPER_DIAG_ROW") {
-                        dist(vid0, vid1) = cost;
-                        dist(vid1, vid0) = cost;
+                        dist.set(vid0, vid1, cost);
+                        dist.set(vid1, vid0, cost);
                         if (++vid1 >= num_vertices) {
                             ++vid0;
                             vid1 = vid0;
                         }
                     } else if (data_format == "UPPER_ROW") {
                         if (vid0 == 0 && vid1 == 0) vid1 = 1;
-                        dist(vid0, vid1) = cost;
-                        dist(vid1, vid0) = cost;
+                        dist.set(vid0, vid1, cost);
+                        dist.set(vid1, vid0, cost);
                         if (++vid1 >= num_vertices) {
                             ++vid0;
                             vid1 = vid0 + 1;
@@ -271,7 +271,7 @@ Instance read_instance(const std::string& filename) {
         } else if (state == State::kSimpleMatrix) {
             if (is_data_line(line)) {
                 for (const std::string& tok : tokens(line)) {
-                    dist(vid0, vid1) = to_int(tok);
+                    dist.set(vid0, vid1, to_int(tok));
                     if (++vid1 >= num_vertices) {
                         ++vid0;
                         vid1 = 0;
@@ -298,18 +298,18 @@ Instance read_instance(const std::string& filename) {
             for (int i = 0; i < num_vertices; ++i) {
                 for (int j = 0; j < num_vertices; ++j) {
                     if (i == j) {
-                        dist(i, j) = kParserInf;
+                        dist.set(i, j, kParserInf);
                         continue;
                     }
                     const double dx = coords[i][0] - coords[j][0];
                     const double dy = coords[i][1] - coords[j][1];
                     if (data_format == "EUC_2D") {
-                        dist(i, j) = nint(std::sqrt(dx * dx + dy * dy));
+                        dist.set(i, j, nint(std::sqrt(dx * dx + dy * dy)));
                     } else if (data_format == "MAN_2D") {
-                        dist(i, j) = nint(std::abs(dx) + std::abs(dy));
+                        dist.set(i, j, nint(std::abs(dx) + std::abs(dy)));
                     } else {  // CEIL_2D
-                        dist(i, j) =
-                            static_cast<Cost>(std::ceil(std::sqrt(dx * dx + dy * dy)));
+                        dist.set(i, j,
+                                 static_cast<Cost>(std::ceil(std::sqrt(dx * dx + dy * dy))));
                     }
                 }
             }
@@ -327,7 +327,7 @@ Instance read_instance(const std::string& filename) {
             for (int i = 0; i < num_vertices; ++i) {
                 for (int j = 0; j < num_vertices; ++j) {
                     if (i == j) {
-                        dist(i, j) = kParserInf;
+                        dist.set(i, j, kParserInf);
                         continue;
                     }
                     const double q1 = std::cos(lon[i] - lon[j]);
@@ -335,20 +335,20 @@ Instance read_instance(const std::string& filename) {
                     const double q3 = std::cos(lat[i] + lat[j]);
                     const double cost =
                         kRadius * std::acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0;
-                    dist(i, j) = static_cast<Cost>(std::floor(cost));
+                    dist.set(i, j, static_cast<Cost>(std::floor(cost)));
                 }
             }
         } else if (data_format == "ATT") {
             for (int i = 0; i < num_vertices; ++i) {
                 for (int j = 0; j < num_vertices; ++j) {
                     if (i == j) {
-                        dist(i, j) = kParserInf;
+                        dist.set(i, j, kParserInf);
                         continue;
                     }
                     const double dx = coords[i][0] - coords[j][0];
                     const double dy = coords[i][1] - coords[j][1];
                     const double r = std::sqrt((dx * dx + dy * dy) / 10.0);
-                    dist(i, j) = nint(std::ceil(r));
+                    dist.set(i, j, nint(std::ceil(r)));
                 }
             }
         } else {

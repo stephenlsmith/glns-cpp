@@ -49,6 +49,30 @@ code, so this ~1.1–1.4x is the "free" speedup before any optimization work
 (workspace reuse in `remove_insert`/`worst_removal`, flat scratch buffers in
 `pdf_select`, etc.).
 
+## Addendum: optimization pass (same day)
+
+Applied after the numbers above: `-O3`, reusable workspaces threading through
+the hot loop (no allocation per iteration), and 32-bit storage for the
+distance matrix and set-distance tables (arithmetic stays 64-bit; halves the
+cache footprint). Every change is semantics-preserving: all 45 instances
+produce **byte-identical tours** at a fixed seed before and after.
+
+| instance | Julia (s) | C++ v1 (s) | C++ optimized (s) | vs Julia |
+|---|---|---|---|---|
+| 40kroa200 | 0.32 | 0.13 | 0.12 | 2.8x |
+| 64lin318 | 0.39 | 0.33 | 0.30 | 1.3x |
+| 107att532 | 2.15 | 1.78 | 1.59 | 1.3x |
+| 132d657 | 5.12 | 4.26 | 3.67 | 1.4x |
+| 157rat783 | 6.76 | 6.35 | 5.54 | 1.2x |
+| 212u1060 | 23.37 | 16.13 | 14.07 | 1.7x |
+
+Measured but rejected: swapping the `relax_in` loop nest for row-contiguous
+matrix access (neutral — GTSPLIB sets are too small for it to matter, kept
+anyway since it is not slower and reads better); full int32 `Cost`
+(only ~5% beyond narrow storage, not worth the API constraint). Remaining
+levers all change search semantics (threaded cold trials, incremental
+`worst_vertices`) and belong to a separate opt-in effort, not a parity port.
+
 ## Full per-instance results
 
 ```

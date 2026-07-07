@@ -19,7 +19,7 @@ int select_k(int num, double power, Rng& rng);
 void randpdf_insertion(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                        const Matrix& dist, const Distsv& setdist,
                        std::vector<std::vector<int>>& sets, double power, const Power& noise,
-                       Rng& rng);
+                       Workspace& ws, Rng& rng);
 void cheapest_insertion(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                         const Matrix& dist, const Distsv& setdist,
                         std::vector<std::vector<int>>& sets);
@@ -28,59 +28,61 @@ void insert_lb(const std::vector<int>& tour, const Matrix& dist, const std::vect
                int& bestpos);
 void insert_subset_lb(const std::vector<int>& tour, const Matrix& dist,
                       const std::vector<int>& set, int setind, const Distsv& setdist,
-                      double noise, Rng& rng, int& bestv, int& bestpos);
+                      double noise, std::vector<int>& tour_inds, Rng& rng, int& bestv,
+                      int& bestpos);
 void random_insertion(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                       const Matrix& dist, std::vector<std::vector<int>>& sets,
                       const Distsv& setdist, Rng& rng);
 void random_initial_tour(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                          std::vector<std::vector<int>>& sets, Rng& rng);
-std::vector<int> worst_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
-                               const std::vector<int>& member, double power, Rng& rng);
-std::vector<int> segment_removal(std::vector<int>& tour, int num_to_remove,
-                                 const std::vector<int>& member, Rng& rng);
-std::vector<int> distance_removal(std::vector<int>& tour, const Matrix& dist,
-                                  int num_to_remove, const std::vector<int>& member,
-                                  double power, Rng& rng);
-std::vector<Cost> worst_vertices(const std::vector<int>& tour, const Matrix& dist);
+void worst_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
+                   const std::vector<int>& member, double power, Workspace& ws, Rng& rng);
+void segment_removal(std::vector<int>& tour, int num_to_remove,
+                     const std::vector<int>& member, std::vector<int>& deleted_sets,
+                     Rng& rng);
+void distance_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
+                      const std::vector<int>& member, double power, Workspace& ws, Rng& rng);
+void worst_vertices(const std::vector<int>& tour, const Matrix& dist,
+                    std::vector<Cost>& removal_cost);
 
 }  // namespace
 
 // Select a removal and an insertion method using the adaptive powers, then
-// perform removal followed by insertion on a copy of the current tour.
-Tour remove_insert(const Tour& current, const Matrix& dist, const std::vector<int>& member,
-                   const Distsv& setdist, std::vector<std::vector<int>>& sets, Powers& powers,
-                   const Config& config, Phase phase, Rng& rng) {
-    Tour trial{current.tour, current.cost};
+// perform removal followed by insertion on `trial` (a reusable copy of
+// `current`; its capacity persists across iterations).
+void remove_insert(const Tour& current, Tour& trial, const Matrix& dist,
+                   const std::vector<int>& member, const Distsv& setdist,
+                   std::vector<std::vector<int>>& sets, Powers& powers, const Config& config,
+                   Phase phase, Workspace& ws, Rng& rng) {
+    trial.tour = current.tour;
+    trial.cost = current.cost;
     pivot_tour(trial.tour, rng);
     const int num_removals = rng.rand_int(config.min_removals, config.max_removals);
 
     Power& removal = power_select(powers.removals, powers.removal_total, phase, rng);
-    std::vector<int> sets_to_insert;
     if (removal.name == "distance") {
-        sets_to_insert = distance_removal(trial.tour, dist, num_removals, member,
-                                          removal.value, rng);
+        distance_removal(trial.tour, dist, num_removals, member, removal.value, ws, rng);
     } else if (removal.name == "worst") {
-        sets_to_insert = worst_removal(trial.tour, dist, num_removals, member,
-                                       removal.value, rng);
+        worst_removal(trial.tour, dist, num_removals, member, removal.value, ws, rng);
     } else {
-        sets_to_insert = segment_removal(trial.tour, num_removals, member, rng);
+        segment_removal(trial.tour, num_removals, member, ws.sets_to_insert, rng);
     }
 
-    for (int s : sets_to_insert) {
+    for (int s : ws.sets_to_insert) {
         rng.shuffle(sets[s]);
     }
 
     Power& insertion = power_select(powers.insertions, powers.insertion_total, phase, rng);
     Power& noise = power_select(powers.noise, powers.noise_total, phase, rng);
     if (insertion.name == "cheapest") {
-        cheapest_insertion(trial.tour, sets_to_insert, dist, setdist, sets);
+        cheapest_insertion(trial.tour, ws.sets_to_insert, dist, setdist, sets);
     } else {
-        randpdf_insertion(trial.tour, sets_to_insert, dist, setdist, sets, insertion.value,
-                          noise, rng);
+        randpdf_insertion(trial.tour, ws.sets_to_insert, dist, setdist, sets, insertion.value,
+                          noise, ws, rng);
     }
 
     if (rng.next_double() < config.prob_reopt) {
-        opt_cycle(trial, dist, sets, member, config, setdist, /*partial=*/true, rng);
+        opt_cycle(trial, dist, sets, member, config, setdist, /*partial=*/true, ws, rng);
     } else {
         trial.cost = tour_cost(trial.tour, dist);
     }
@@ -97,12 +99,12 @@ Tour remove_insert(const Tour& current, const Matrix& dist, const std::vector<in
     removal.count[phase] += 1;
     noise.scores[phase] += score;
     noise.count[phase] += 1;
-    return trial;
 }
 
 // pdf-biased selection: pick k via a geometric-like distribution shaped by
 // power, then return a uniformly random index holding the kth smallest weight
-int pdf_select(const std::vector<Cost>& weights, double power, Rng& rng) {
+int pdf_select(const std::vector<Cost>& weights, double power, Rng& rng,
+               std::vector<Cost>& scratch) {
     if (power == 0.0) return static_cast<int>(rng.bounded(weights.size()));
     if (power > 9.0) {
         return rand_select(weights, *std::max_element(weights.begin(), weights.end()), rng);
@@ -118,7 +120,7 @@ int pdf_select(const std::vector<Cost>& weights, double power, Rng& rng) {
     if (k == static_cast<int>(weights.size())) {
         return rand_select(weights, *std::max_element(weights.begin(), weights.end()), rng);
     }
-    std::vector<Cost> scratch(weights);
+    scratch.assign(weights.begin(), weights.end());
     std::nth_element(scratch.begin(), scratch.begin() + (k - 1), scratch.end());
     return rand_select(weights, scratch[k - 1], rng);
 }
@@ -165,8 +167,9 @@ int select_k(int num, double power, Rng& rng) {
 void randpdf_insertion(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                        const Matrix& dist, const Distsv& setdist,
                        std::vector<std::vector<int>>& sets, double power, const Power& noise,
-                       Rng& rng) {
-    std::vector<Cost> mindist(sets_to_insert.size(), kMaxCost);
+                       Workspace& ws, Rng& rng) {
+    std::vector<Cost>& mindist = ws.mindist;
+    mindist.assign(sets_to_insert.size(), kMaxCost);
     for (std::size_t i = 0; i < sets_to_insert.size(); ++i) {
         const int set = sets_to_insert[i];
         for (int vertex : tour) {
@@ -186,12 +189,12 @@ void randpdf_insertion(std::vector<int>& tour, std::vector<int>& sets_to_insert,
                 }
             }
         }
-        const int set_index = pdf_select(mindist, power, rng);
+        const int set_index = pdf_select(mindist, power, rng, ws.pdf_scratch);
         const int nearest_set = sets_to_insert[set_index];
         int bestv = -1, bestpos = -1;
         if (noise.name == "subset") {
             insert_subset_lb(tour, dist, sets[nearest_set], nearest_set, setdist, noise.value,
-                             rng, bestv, bestpos);
+                             ws.tour_inds, rng, bestv, bestpos);
         } else {
             insert_lb(tour, dist, sets[nearest_set], nearest_set, setdist, noise.value, rng,
                       bestv, bestpos);
@@ -255,9 +258,10 @@ void insert_lb(const std::vector<int>& tour, const Matrix& dist, const std::vect
 // like insert_lb but only examines a random fraction `noise` of tour positions
 void insert_subset_lb(const std::vector<int>& tour, const Matrix& dist,
                       const std::vector<int>& set, int setind, const Distsv& setdist,
-                      double noise, Rng& rng, int& bestv, int& bestpos) {
+                      double noise, std::vector<int>& tour_inds, Rng& rng, int& bestv,
+                      int& bestpos) {
     Cost best_cost = kMaxCost;
-    std::vector<int> tour_inds(tour.size());
+    tour_inds.resize(tour.size());
     for (std::size_t i = 0; i < tour.size(); ++i) tour_inds[i] = static_cast<int>(i);
 
     const std::size_t limit =
@@ -309,62 +313,63 @@ void random_initial_tour(std::vector<int>& tour, std::vector<int>& sets_to_inser
 }
 
 // remove vertices biased towards those that add the most length to the tour
-std::vector<int> worst_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
-                               const std::vector<int>& member, double power, Rng& rng) {
-    std::vector<int> deleted_sets;
+void worst_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
+                   const std::vector<int>& member, double power, Workspace& ws, Rng& rng) {
+    std::vector<int>& deleted_sets = ws.sets_to_insert;
+    deleted_sets.clear();
     while (static_cast<int>(deleted_sets.size()) < num_to_remove) {
-        const std::vector<Cost> removal_costs = worst_vertices(tour, dist);
-        const int ind = pdf_select(removal_costs, power, rng);
+        worst_vertices(tour, dist, ws.removal_costs);
+        const int ind = pdf_select(ws.removal_costs, power, rng, ws.pdf_scratch);
         deleted_sets.push_back(member[tour[ind]]);
         tour.erase(tour.begin() + ind);
     }
-    return deleted_sets;
 }
 
 // remove a single continuous segment of the tour
-std::vector<int> segment_removal(std::vector<int>& tour, int num_to_remove,
-                                 const std::vector<int>& member, Rng& rng) {
+void segment_removal(std::vector<int>& tour, int num_to_remove,
+                     const std::vector<int>& member, std::vector<int>& deleted_sets,
+                     Rng& rng) {
     std::size_t i = rng.bounded(tour.size());
-    std::vector<int> deleted_sets;
+    deleted_sets.clear();
     while (static_cast<int>(deleted_sets.size()) < num_to_remove) {
         if (i >= tour.size()) i = 0;
         deleted_sets.push_back(member[tour[i]]);
         tour.erase(tour.begin() + i);
     }
-    return deleted_sets;
 }
 
 // pick a random vertex and remove vertices biased towards its neighbors
-std::vector<int> distance_removal(std::vector<int>& tour, const Matrix& dist,
-                                  int num_to_remove, const std::vector<int>& member,
-                                  double power, Rng& rng) {
-    std::vector<int> deleted_sets;
-    std::vector<int> deleted_vertices;
+void distance_removal(std::vector<int>& tour, const Matrix& dist, int num_to_remove,
+                      const std::vector<int>& member, double power, Workspace& ws, Rng& rng) {
+    std::vector<int>& deleted_sets = ws.sets_to_insert;
+    std::vector<int>& deleted_vertices = ws.deleted_vertices;
+    deleted_sets.clear();
+    deleted_vertices.clear();
 
     const std::size_t seed_index = rng.bounded(tour.size());
     deleted_sets.push_back(member[tour[seed_index]]);
     deleted_vertices.push_back(tour[seed_index]);
     tour.erase(tour.begin() + seed_index);
 
-    std::vector<Cost> mindist(tour.size());
+    std::vector<Cost>& mindist = ws.mindist;
     while (static_cast<int>(deleted_sets.size()) < num_to_remove) {
         const int seed_vertex = rng.pick(deleted_vertices);
         mindist.resize(tour.size());
         for (std::size_t i = 0; i < tour.size(); ++i) {
             mindist[i] = std::min(dist(seed_vertex, tour[i]), dist(tour[i], seed_vertex));
         }
-        const int del_index = pdf_select(mindist, power, rng);
+        const int del_index = pdf_select(mindist, power, rng, ws.pdf_scratch);
         deleted_sets.push_back(member[tour[del_index]]);
         deleted_vertices.push_back(tour[del_index]);
         tour.erase(tour.begin() + del_index);
     }
-    return deleted_sets;
 }
 
 // cost of removing each vertex from the tour, given that all others remain
-std::vector<Cost> worst_vertices(const std::vector<int>& tour, const Matrix& dist) {
+void worst_vertices(const std::vector<int>& tour, const Matrix& dist,
+                    std::vector<Cost>& removal_cost) {
     const std::size_t n = tour.size();
-    std::vector<Cost> removal_cost(n);
+    removal_cost.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
         if (i == 0) {
             removal_cost[i] =
@@ -378,7 +383,6 @@ std::vector<Cost> worst_vertices(const std::vector<int>& tour, const Matrix& dis
                               dist(tour[i - 1], tour[i + 1]);
         }
     }
-    return removal_cost;
 }
 
 }  // namespace

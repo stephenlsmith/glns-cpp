@@ -29,17 +29,27 @@ namespace glns {
 using Cost = std::int64_t;
 
 // Dense row-major cost matrix; operator()(i, j) is the cost of arc i -> j.
+// Entries are stored as 32 bits to halve the solver's cache footprint;
+// arithmetic on them is still done in 64-bit Cost.  Individual distances
+// must therefore fit in int32 (tour costs may still exceed it).
 class Matrix {
 public:
     Matrix() = default;
-    Matrix(int n, Cost fill) : n_(n), data_(static_cast<std::size_t>(n) * n, fill) {}
-    Cost& operator()(int i, int j) { return data_[static_cast<std::size_t>(i) * n_ + j]; }
-    Cost operator()(int i, int j) const { return data_[static_cast<std::size_t>(i) * n_ + j]; }
+    Matrix(int n, Cost fill) : n_(n) {
+        data_.assign(static_cast<std::size_t>(n) * n, checked(fill));
+    }
+    Cost operator()(int i, int j) const {
+        return data_[static_cast<std::size_t>(i) * n_ + j];
+    }
+    void set(int i, int j, Cost value) {
+        data_[static_cast<std::size_t>(i) * n_ + j] = checked(value);
+    }
     int size() const { return n_; }
 
 private:
+    static std::int32_t checked(Cost value);
     int n_ = 0;
-    std::vector<Cost> data_;
+    std::vector<std::int32_t> data_;
 };
 
 // A GTSP instance.  Vertices are 0-indexed; the sets must partition
