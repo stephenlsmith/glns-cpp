@@ -31,12 +31,13 @@ using Cost = std::int64_t;
 // Dense row-major cost matrix; operator()(i, j) is the cost of arc i -> j.
 // Entries are stored as 32 bits to halve the solver's cache footprint;
 // arithmetic on them is still done in 64-bit Cost.  Individual distances
-// must therefore fit in int32 (tour costs may still exceed it).
+// must therefore be nonnegative and fit in int32 (tour costs may still
+// exceed it).
 class Matrix {
 public:
     Matrix() = default;
     Matrix(int n, Cost fill) : n_(n) {
-        data_.assign(static_cast<std::size_t>(n) * n, checked(fill));
+        data_.assign(checked_size(n), checked(fill));
     }
     Cost operator()(int i, int j) const {
         return data_[static_cast<std::size_t>(i) * n_ + j];
@@ -48,6 +49,7 @@ public:
 
 private:
     static std::int32_t checked(Cost value);
+    static std::size_t checked_size(int n);
     int n_ = 0;
     std::vector<std::int32_t> data_;
 };
@@ -95,7 +97,7 @@ struct Solution {
     double solve_time = 0.0;   // seconds
     bool timeout = false;      // stopped because max_time was hit
     bool budget_met = false;   // stopped because the cost budget was met
-    std::int64_t total_iterations = 0;
+    std::int64_t total_iterations = 0;  // completed removal-insertion iterations
 };
 
 // Parse a GTSPLIB-format (or "simple"-format) instance file.

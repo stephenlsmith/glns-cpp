@@ -10,10 +10,14 @@
 // file.
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include "internal.hpp"
 
@@ -34,6 +38,18 @@ std::string tour_string(const std::vector<int>& tour) {
     return out.str();
 }
 
+std::string host_name() {
+#ifdef _WIN32
+    const char* hostname = std::getenv("COMPUTERNAME");
+    return hostname != nullptr && hostname[0] != '\0' ? hostname : "unknown";
+#else
+    char hostname[256] = "unknown";
+    if (gethostname(hostname, sizeof(hostname)) != 0) return "unknown";
+    hostname[sizeof(hostname) - 1] = '\0';
+    return hostname;
+#endif
+}
+
 // progress bar string (progress_bar in parse_print.jl)
 void progress_bar(int trials, double progress, Cost cost, double time_sec) {
     const int ticks = 6, trials_per_bar = 5, total_length = 31;
@@ -43,7 +59,7 @@ void progress_bar(int trials, double progress, Cost cost, double time_sec) {
     const int trials_in_bar = std::min(trials_per_bar, trials - start_number);
 
     const double progress_in_bar = (progress * trials - start_number) / trials_in_bar;
-    const int bar_length = std::min(total_length - 1, (trials - start_number) * ticks);
+    const int bar_length = std::min(total_length - 1, trials_in_bar * ticks);
 
     std::string bar = "|";
     for (int i = 1; i <= total_length; ++i) {
@@ -148,19 +164,24 @@ void print_summary(const Tour& lowest, double timer, const std::vector<int>& mem
         std::printf("-----------------------------------\n");
     }
     if (config.output_file != "None") {
-        char hostname[256] = "unknown";
-        gethostname(hostname, sizeof(hostname));
         std::ofstream out(config.output_file);
+        if (!out) {
+            throw std::runtime_error("failed to open output file: " + config.output_file);
+        }
         out << "Problem Instance : " << config.instance_name << "\n";
         out << "Vertices         : " << config.num_vertices << "\n";
         out << "Sets             : " << config.num_sets << "\n";
         out << "Comment          : Solved with the C++ port of GLNS\n";
-        out << "Host Computer    : " << hostname << "\n";
+        out << "Host Computer    : " << host_name() << "\n";
         out << "Solver Time      : " << std::fixed;
         out.precision(3);
         out << timer << " sec\n";
         out << "Tour Cost        : " << lowest.cost << "\n";
         out << "Tour             : " << tour_string(lowest.tour);
+        out.flush();
+        if (!out) {
+            throw std::runtime_error("failed to write output file: " + config.output_file);
+        }
     }
 }
 

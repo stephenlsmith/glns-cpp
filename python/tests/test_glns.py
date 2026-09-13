@@ -78,6 +78,17 @@ def test_float_dtype_rejected():
         raise AssertionError("float dist should raise TypeError")
 
 
+def test_negative_cost_rejected():
+    dist = TINY_DIST.copy()
+    dist[0, 1] = -1
+    try:
+        glns.solve(dist, TINY_SETS)
+    except RuntimeError as e:
+        assert "negative" in str(e)
+    else:
+        raise AssertionError("negative edge cost should raise")
+
+
 def test_invalid_sets_rejected():
     try:
         glns.solve(TINY_DIST, [[0, 1], [1, 2], [4, 5]])  # vertex 1 twice, 3 missing
@@ -87,9 +98,63 @@ def test_invalid_sets_rejected():
         raise AssertionError("overlapping sets should raise")
 
 
+def test_empty_set_rejected():
+    try:
+        glns.solve(TINY_DIST, [[0, 1, 2, 3, 4, 5], []])
+    except RuntimeError as e:
+        assert "empty" in str(e)
+    else:
+        raise AssertionError("empty set should raise")
+
+
+def test_noninteger_vertex_ids_rejected():
+    for sets in ([[0.9], [1.9]], [[-0.5], [1.1]], [[0.0], [1.0]], [["0"], ["1"]]):
+        try:
+            glns.solve([[0, 1], [1, 0]], sets, seed=1)
+        except TypeError as e:
+            assert "integer vertex ids" in str(e)
+        else:
+            raise AssertionError(f"noninteger vertex ids should raise: {sets}")
+
+
+def test_numpy_vertex_ids_and_generators():
+    sets = ((np.int64(v) for v in s) for s in TINY_SETS)
+    sol = glns.solve(TINY_DIST, sets, seed=42)
+    assert sol.cost == 9
+    check_feasible(sol.tour, TINY_SETS, 6)
+
+
 def test_budget_and_max_time_flags():
     sol = glns.solve(TINY_DIST, TINY_SETS, seed=1, budget=1_000_000)
     assert sol.budget_met  # any tour beats a huge budget
+    assert sol.total_iterations == 0
+
+    for options, expected in [({"max_time": 0}, (True, False)),
+                              ({"budget": 2}, (False, True))]:
+        sol = glns.solve([[0, 1], [1, 0]], [[0], [1]], seed=1,
+                         num_iterations=1, trials=100000, **options)
+        assert (sol.timeout, sol.budget_met) == expected
+        assert sol.total_iterations == 0
+        assert sol.cost == 2
+
+
+def test_invalid_parameter_rejected():
+    try:
+        glns.solve(TINY_DIST, TINY_SETS, trials=0)
+    except RuntimeError as e:
+        assert "trials" in str(e)
+    else:
+        raise AssertionError("zero trials should raise")
+
+
+def test_output_error_reported():
+    output = os.path.join(EXAMPLES, "missing", "tour.txt")
+    try:
+        glns.solve(TINY_DIST, TINY_SETS, seed=1, trials=1, output_file=output)
+    except RuntimeError as e:
+        assert "output file" in str(e)
+    else:
+        raise AssertionError("unwritable output path should raise")
 
 
 if __name__ == "__main__":

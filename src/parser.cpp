@@ -8,9 +8,11 @@
 // untested and indexes out of bounds; here LOWER_ROW fills the strict
 // lower triangle row by row.
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -93,14 +95,80 @@ std::vector<std::string> tokens(const std::string& line) {
 
 std::int64_t to_int(const std::string& s) {
     try {
-        return std::stoll(s);
+        std::size_t parsed = 0;
+        const std::int64_t value = std::stoll(s, &parsed);
+        if (parsed != s.size()) throw std::invalid_argument("trailing characters");
+        return value;
     } catch (const std::exception&) {
         throw std::runtime_error("failed to parse integer: '" + s + "'");
     }
 }
 
+double to_double(const std::string& s, const std::string& field) {
+    try {
+        std::size_t parsed = 0;
+        const double value = std::stod(s, &parsed);
+        if (parsed != s.size() || !std::isfinite(value)) {
+            throw std::invalid_argument("invalid floating-point value");
+        }
+        return value;
+    } catch (const std::exception&) {
+        throw std::runtime_error("failed to parse " + field + ": '" + s + "'");
+    }
+}
+
+int to_positive_int(const std::string& s, const std::string& field) {
+    const std::int64_t value = to_int(s);
+    if (value <= 0 || value > std::numeric_limits<int>::max()) {
+        throw std::runtime_error(field + " must be a positive integer");
+    }
+    return static_cast<int>(value);
+}
+
+std::size_t matrix_value_count(int n, const std::string& format) {
+    const std::size_t size = static_cast<std::size_t>(n);
+    const std::size_t max = std::numeric_limits<std::size_t>::max();
+    if (format == "FULL_MATRIX") {
+        if (size > max / size) throw std::runtime_error("distance matrix is too large");
+        return size * size;
+    }
+    if (format == "LOWER_DIAG_ROW" || format == "UPPER_DIAG_ROW") {
+        std::size_t a = size;
+        std::size_t b = size + 1;
+        if (a % 2 == 0) {
+            a /= 2;
+        } else {
+            b /= 2;
+        }
+        if (a > max / b) throw std::runtime_error("distance matrix is too large");
+        return a * b;
+    }
+    if (format == "LOWER_ROW" || format == "UPPER_ROW") {
+        std::size_t a = size;
+        std::size_t b = size - 1;
+        if (a % 2 == 0) {
+            a /= 2;
+        } else {
+            b /= 2;
+        }
+        if (b != 0 && a > max / b) {
+            throw std::runtime_error("distance matrix is too large");
+        }
+        return a * b;
+    }
+    throw std::runtime_error("edge weight format " + format + " not supported");
+}
+
+Cost checked_distance(double value) {
+    if (!std::isfinite(value) || value < 0.0 ||
+        value > static_cast<double>(std::numeric_limits<std::int32_t>::max())) {
+        throw std::runtime_error("computed distance is outside the supported 32-bit range");
+    }
+    return static_cast<Cost>(value);
+}
+
 // nint as defined by TSPLIB
-std::int64_t nint(double x) { return static_cast<std::int64_t>(std::floor(x + 0.5)); }
+Cost nint(double x) { return checked_distance(std::floor(x + 0.5)); }
 
 std::pair<double, double> degree_minutes(double num) {
     const double deg = num > 0 ? std::floor(num) : std::ceil(num);
@@ -134,10 +202,15 @@ Instance read_instance(const std::string& filename) {
     Matrix dist;
     std::vector<std::vector<int>> sets;         // 1-based ids during parsing
     std::vector<std::vector<double>> coords;
+    std::vector<bool> coord_seen;
+    int coord_count = 0;
     std::vector<std::int64_t> set_data;
     int num_vertices = -1;
     int num_sets = -1;
     int vid0 = 0, vid1 = 0;  // 0-based fill position in the matrix
+    std::size_t matrix_values = 0;
+    std::size_t expected_matrix_values = 0;
+    bool matrix_size_known = false;
 
     std::string raw_line;
     while (std::getline(file, raw_line)) {
@@ -154,24 +227,38 @@ Instance read_instance(const std::string& filename) {
 
         if (state == State::kTsplibHeader) {
             if (is_header(line, "DIMENSION")) {
-                num_vertices = static_cast<int>(to_int(header_value(line)));
+                num_vertices =
+                    to_positive_int(header_value(line), "DIMENSION");
                 dist = Matrix(num_vertices, 0);
+                coords.assign(num_vertices, {});
+                coord_seen.assign(num_vertices, false);
             } else if (is_header(line, "GTSP_SETS")) {
-                num_sets = static_cast<int>(to_int(header_value(line)));
+                num_sets = to_positive_int(header_value(line), "GTSP_SETS");
             } else if (is_header(line, "EDGE_WEIGHT_TYPE")) {
-                data_type = header_value(line);
+                data_type = upper(header_value(line));
                 data_format = data_type;
             } else if (is_header(line, "EDGE_WEIGHT_FORMAT")) {
-                if (data_type == "EXPLICIT") data_format = header_value(line);
+                if (data_type == "EXPLICIT") data_format = upper(header_value(line));
             } else if (is_section(line, "EDGE_WEIGHT_SECTION")) {
+                if (num_vertices <= 0) {
+                    throw std::runtime_error("EDGE_WEIGHT_SECTION precedes DIMENSION");
+                }
+                expected_matrix_values = matrix_value_count(num_vertices, data_format);
+                matrix_size_known = true;
                 state = State::kTsplibMatrixData;
             } else if (is_section(line, "NODE_COORD_SECTION")) {
+                if (num_vertices <= 0) {
+                    throw std::runtime_error("NODE_COORD_SECTION precedes DIMENSION");
+                }
                 state = State::kTsplibCoordData;
             }
 
         } else if (state == State::kTsplibMatrixData) {
             if (is_data_line(line)) {
                 for (const std::string& tok : tokens(line)) {
+                    if (matrix_values >= expected_matrix_values) {
+                        throw std::runtime_error("edge weight matrix has more values than expected");
+                    }
                     const Cost cost = to_int(tok);
                     if (data_format == "FULL_MATRIX") {
                         dist.set(vid0, vid1, cost);
@@ -210,10 +297,8 @@ Instance read_instance(const std::string& filename) {
                             ++vid0;
                             vid1 = vid0 + 1;
                         }
-                    } else {
-                        throw std::runtime_error("edge weight format " + data_format +
-                                                 " not supported");
                     }
+                    ++matrix_values;
                 }
             } else if (is_section(line, "DISPLAY_DATA_SECTION")) {
                 state = State::kTsplibDisplayData;
@@ -231,11 +316,26 @@ Instance read_instance(const std::string& filename) {
                 state = State::kTsplibSetData;
             } else if (contains_digit(line)) {
                 const std::vector<std::string> toks = tokens(line);
-                std::vector<double> coord;
-                for (std::size_t i = 1; i < toks.size(); ++i) {
-                    coord.push_back(std::stod(toks[i]));
+                if (toks.size() != 3) {
+                    throw std::runtime_error(
+                        "node coordinate row must contain an id and two coordinates");
                 }
-                coords.push_back(coord);
+                const int id = to_positive_int(toks[0], "node id");
+                if (id > num_vertices) {
+                    throw std::runtime_error("node id " + std::to_string(id) + " out of range");
+                }
+                if (coord_seen[id - 1]) {
+                    throw std::runtime_error("duplicate node id " + std::to_string(id));
+                }
+                try {
+                    coords[id - 1] = {to_double(toks[1], "coordinate"),
+                                      to_double(toks[2], "coordinate")};
+                } catch (const std::exception&) {
+                    throw std::runtime_error("failed to parse coordinates for node " +
+                                             std::to_string(id));
+                }
+                coord_seen[id - 1] = true;
+                ++coord_count;
             }
 
         } else if (state == State::kTsplibSetData) {
@@ -249,10 +349,13 @@ Instance read_instance(const std::string& filename) {
 
         } else if (state == State::kSimpleHeader) {
             if (is_header(line, "N")) {
-                num_vertices = static_cast<int>(to_int(header_value(line)));
+                num_vertices = to_positive_int(header_value(line), "N");
                 dist = Matrix(num_vertices, 0);
             } else if (is_header(line, "M")) {
-                num_sets = static_cast<int>(to_int(header_value(line)));
+                num_sets = to_positive_int(header_value(line), "M");
+                if (num_vertices <= 0) {
+                    throw std::runtime_error("M header precedes N header");
+                }
                 state = State::kSimpleSets;
             }
 
@@ -260,18 +363,34 @@ Instance read_instance(const std::string& filename) {
             if (is_data_line(line)) {
                 const std::vector<std::string> toks = tokens(line);
                 const std::int64_t sid = to_int(toks[0]);
+                const std::int64_t expected_sid =
+                    static_cast<std::int64_t>(sets.size()) + 1;
+                if (sid != expected_sid || sid > num_sets) {
+                    throw std::runtime_error("unexpected set id " + std::to_string(sid) +
+                                             "; expected " +
+                                             std::to_string(expected_sid));
+                }
                 std::vector<int> set;
                 for (std::size_t i = 1; i < toks.size(); ++i) {
-                    set.push_back(static_cast<int>(to_int(toks[i])));
+                    set.push_back(to_positive_int(toks[i], "vertex id"));
                 }
                 sets.push_back(set);
-                if (sid == num_sets) state = State::kSimpleMatrix;
+                if (sid == num_sets) {
+                    expected_matrix_values =
+                        matrix_value_count(num_vertices, "FULL_MATRIX");
+                    matrix_size_known = true;
+                    state = State::kSimpleMatrix;
+                }
             }
 
         } else if (state == State::kSimpleMatrix) {
             if (is_data_line(line)) {
                 for (const std::string& tok : tokens(line)) {
+                    if (matrix_values >= expected_matrix_values) {
+                        throw std::runtime_error("distance matrix has more values than expected");
+                    }
                     dist.set(vid0, vid1, to_int(tok));
+                    ++matrix_values;
                     if (++vid1 >= num_vertices) {
                         ++vid0;
                         vid1 = 0;
@@ -288,9 +407,18 @@ Instance read_instance(const std::string& filename) {
                         state == State::kTsplibCoordData ||
                         state == State::kTsplibSetData || state == State::kTsplibDone;
 
+    if (tsplib && data_type == "EXPLICIT" && !matrix_size_known) {
+        throw std::runtime_error("EXPLICIT instances require an EDGE_WEIGHT_SECTION");
+    }
+    if (matrix_size_known && matrix_values != expected_matrix_values) {
+        throw std::runtime_error("distance matrix has " + std::to_string(matrix_values) +
+                                 " values; expected " +
+                                 std::to_string(expected_matrix_values));
+    }
+
     // convert coordinate data to matrix data
     if (tsplib && data_type != "EXPLICIT") {
-        if (static_cast<int>(coords.size()) != num_vertices) {
+        if (coord_count != num_vertices) {
             throw std::runtime_error("node coordinate count doesn't match DIMENSION");
         }
         if (data_format == "EUC_2D" || data_format == "MAN_2D" ||
@@ -309,7 +437,7 @@ Instance read_instance(const std::string& filename) {
                         dist.set(i, j, nint(std::abs(dx) + std::abs(dy)));
                     } else {  // CEIL_2D
                         dist.set(i, j,
-                                 static_cast<Cost>(std::ceil(std::sqrt(dx * dx + dy * dy))));
+                                 checked_distance(std::ceil(std::sqrt(dx * dx + dy * dy))));
                     }
                 }
             }
@@ -333,9 +461,11 @@ Instance read_instance(const std::string& filename) {
                     const double q1 = std::cos(lon[i] - lon[j]);
                     const double q2 = std::cos(lat[i] - lat[j]);
                     const double q3 = std::cos(lat[i] + lat[j]);
-                    const double cost =
-                        kRadius * std::acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0;
-                    dist.set(i, j, static_cast<Cost>(std::floor(cost)));
+                    const double acos_arg =
+                        std::max(-1.0, std::min(1.0,
+                            0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)));
+                    const double cost = kRadius * std::acos(acos_arg) + 1.0;
+                    dist.set(i, j, checked_distance(std::floor(cost)));
                 }
             }
         } else if (data_format == "ATT") {
@@ -358,20 +488,27 @@ Instance read_instance(const std::string& filename) {
 
     // construct sets from the GTSP_SET_SECTION data
     if (tsplib) {
-        std::vector<int> set;
-        // drop the leading set id, then split on -1 terminators (each of
-        // which is followed by the next set's id)
-        std::size_t i = 1;
+        std::size_t i = 0;
+        int expected_sid = 1;
         while (i < set_data.size()) {
-            const std::int64_t x = set_data[i];
-            if (x == -1) {
-                sets.push_back(set);
-                set.clear();
-                i += 1;  // skip the next set id
-            } else {
-                set.push_back(static_cast<int>(x));
+            const std::int64_t sid = set_data[i++];
+            if (sid != expected_sid) {
+                throw std::runtime_error("unexpected set id " + std::to_string(sid) +
+                                         "; expected " +
+                                         std::to_string(expected_sid));
             }
-            i += 1;
+            std::vector<int> set;
+            while (i < set_data.size() && set_data[i] != -1) {
+                set.push_back(to_positive_int(std::to_string(set_data[i]), "vertex id"));
+                ++i;
+            }
+            if (i == set_data.size()) {
+                throw std::runtime_error("set " + std::to_string(sid) +
+                                         " is missing its -1 terminator");
+            }
+            ++i;  // -1 terminator
+            sets.push_back(std::move(set));
+            ++expected_sid;
         }
         if (num_sets != static_cast<int>(sets.size())) {
             throw std::runtime_error("number of sets doesn't match set size");

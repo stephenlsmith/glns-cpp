@@ -6,6 +6,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -74,6 +78,52 @@ void test_parser(const std::string& dir) {
     }
 }
 
+void test_parser_rejections(const std::string& dir) {
+    for (const char* file : {"matrix-too-few.gtsp", "matrix-too-many.gtsp",
+                             "matrix-invalid-number.gtsp", "coordinate-too-few.gtsp",
+                             "set-missing-terminator.gtsp", "missing-weights.gtsp"}) {
+        bool rejected = false;
+        try {
+            (void)glns::read_instance(dir + "/" + file);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+}
+
+void test_parser_formats(const std::string& dir) {
+    for (const char* file : {"lower-diag-row.gtsp", "lower-row.gtsp",
+                             "upper-diag-row.gtsp", "upper-row.gtsp"}) {
+        const glns::Instance inst = glns::read_instance(dir + "/" + file);
+        CHECK(inst.num_vertices == 3);
+        CHECK(inst.num_sets == 3);
+        CHECK(inst.dist(0, 0) == 0);
+        CHECK(inst.dist(0, 1) == 1);
+        CHECK(inst.dist(1, 0) == 1);
+        CHECK(inst.dist(0, 2) == 2);
+        CHECK(inst.dist(2, 0) == 2);
+        CHECK(inst.dist(1, 2) == 3);
+        CHECK(inst.dist(2, 1) == 3);
+    }
+
+    struct CoordinateCase {
+        const char* file;
+        glns::Cost distance;
+    };
+    for (const CoordinateCase& test : {
+             CoordinateCase{"ceil-2d.gtsp", 2},
+             CoordinateCase{"man-2d.gtsp", 2},
+             CoordinateCase{"att.gtsp", 2},
+             CoordinateCase{"geo.gtsp", 1},
+         }) {
+        const glns::Instance inst = glns::read_instance(dir + "/" + test.file);
+        CHECK(inst.num_vertices == 2);
+        CHECK(inst.dist(0, 1) == test.distance);
+        CHECK(inst.dist(1, 0) == test.distance);
+    }
+}
+
 bool feasible(const glns::Instance& inst, const std::vector<int>& tour) {
     if (static_cast<int>(tour.size()) != inst.num_sets) return false;
     std::vector<bool> seen(inst.num_sets, false);
@@ -129,12 +179,251 @@ void test_solver(const std::string& dir) {
                 static_cast<long long>(a.cost));
 }
 
+void test_invalid_instance() {
+    bool unfinalized_rejected = false;
+    try {
+        (void)glns::solve(glns::Instance{});
+    } catch (const std::runtime_error& e) {
+        unfinalized_rejected = std::string(e.what()).find("not finalized") !=
+                               std::string::npos;
+    }
+    CHECK(unfinalized_rejected);
+
+    glns::Instance inst;
+    inst.num_vertices = 4;
+    inst.num_sets = 2;
+    inst.dist = glns::Matrix(4, 1);
+    inst.sets = {{0, 1, 2, 3}, {}};
+
+    bool rejected = false;
+    try {
+        inst.finalize();
+    } catch (const std::runtime_error& e) {
+        rejected = std::string(e.what()).find("empty") != std::string::npos;
+    }
+    CHECK(rejected);
+
+    bool negative_rejected = false;
+    try {
+        glns::Matrix matrix(2, 0);
+        matrix.set(0, 1, -1);
+    } catch (const std::runtime_error& e) {
+        negative_rejected = std::string(e.what()).find("negative") != std::string::npos;
+    }
+    CHECK(negative_rejected);
+
+    bool dimension_rejected = false;
+    try {
+        (void)glns::Matrix(-1, 0);
+    } catch (const std::runtime_error& e) {
+        dimension_rejected = std::string(e.what()).find("dimension") != std::string::npos;
+    }
+    CHECK(dimension_rejected);
+}
+
+void test_invalid_parameters(const std::string& dir) {
+    const glns::Instance inst = glns::read_instance(dir + "/tiny.gtsp");
+
+    auto rejected = [&](const glns::Params& params, const char* message) {
+        try {
+            (void)glns::solve(inst, params);
+            return false;
+        } catch (const std::runtime_error& e) {
+            return std::string(e.what()).find(message) != std::string::npos;
+        }
+    };
+
+    glns::Params params;
+    params.trials = 0;
+    CHECK(rejected(params, "trials"));
+    params = {};
+    params.num_iterations = 0;
+    CHECK(rejected(params, "num_iterations"));
+    params = {};
+    params.epsilon = 1.1;
+    CHECK(rejected(params, "epsilon"));
+    params = {};
+    params.noise = "typo";
+    CHECK(rejected(params, "noise"));
+    params = {};
+    params.verbose = 4;
+    CHECK(rejected(params, "verbose"));
+}
+
+void test_zero_cost_optimum() {
+    glns::Instance inst;
+    inst.num_vertices = 4;
+    inst.num_sets = 2;
+    inst.dist = glns::Matrix(4, 0);
+    inst.sets = {{0, 1}, {2, 3}};
+    inst.finalize();
+
+    glns::Params params;
+    params.seed = 1;
+    const glns::Solution sol = glns::solve(inst, params);
+    CHECK(sol.cost == 0);
+    CHECK(sol.total_iterations == 0);
+    CHECK(!sol.timeout);
+}
+
+void test_stopping_conditions() {
+    glns::Instance inst;
+    inst.num_vertices = 2;
+    inst.num_sets = 2;
+    inst.sets = {{0}, {1}};
+    inst.dist = glns::Matrix(2, 1);
+    inst.finalize();
+
+    for (const char* mode : {"default", "fast", "slow"}) {
+        glns::Params params;
+        params.mode = mode;
+        params.seed = 1;
+        params.num_iterations = 1;  // no inner-loop iterations in these modes
+        params.trials = std::numeric_limits<int>::max();
+        params.restarts = std::numeric_limits<int>::max();
+        params.max_time = 0;
+        const auto timed = glns::solve(inst, params);
+        CHECK(timed.timeout);
+        CHECK(!timed.budget_met);
+        CHECK(timed.total_iterations == 0);
+        CHECK(timed.cost == 2);
+        CHECK(feasible(inst, timed.tour));
+
+        params.max_time = 60;
+        params.budget = 2;
+        const auto budgeted = glns::solve(inst, params);
+        CHECK(!budgeted.timeout);
+        CHECK(budgeted.budget_met);
+        CHECK(budgeted.total_iterations == 0);
+        CHECK(budgeted.cost == 2);
+
+        params.max_time = 0;
+        const auto both = glns::solve(inst, params);
+        CHECK(both.timeout);
+        CHECK(both.budget_met);
+    }
+
+    // A positive deadline must also interrupt restarts when no iteration runs.
+    glns::Params params;
+    params.seed = 1;
+    params.num_iterations = 1;
+    params.trials = std::numeric_limits<int>::max();
+    params.max_time = 0.01;
+    for (int restarts : {0, std::numeric_limits<int>::max()}) {
+        params.restarts = restarts;
+        const auto timed = glns::solve(inst, params);
+        CHECK(timed.timeout);
+        CHECK(timed.total_iterations == 0);
+    }
+}
+
+void test_terminating_iteration_count() {
+    glns::Instance inst;
+    inst.num_vertices = 4;
+    inst.num_sets = 2;
+    inst.sets = {{0, 1}, {2, 3}};
+    inst.dist = glns::Matrix(4, 10);
+    inst.dist.set(0, 2, 1);
+    inst.dist.set(2, 0, 1);
+    inst.finalize();
+
+    // For two sets, reoptimization finds the global optimum in one iteration.
+    // Select an initialization whose cost exceeds that optimum.
+    bool checked = false;
+    for (int seed = 0; seed < 16 && !checked; ++seed) {
+        glns::Params params;
+        params.seed = seed;
+        params.max_time = 0;
+        if (glns::solve(inst, params).cost == 2) continue;
+        params.max_time = 60;
+        params.budget = 2;
+        const auto sol = glns::solve(inst, params);
+        CHECK(sol.cost == 2);
+        CHECK(sol.budget_met);
+        CHECK(!sol.timeout);
+        CHECK(sol.total_iterations == 1);
+        checked = true;
+    }
+    CHECK(checked);
+}
+
+void test_zero_cost_found_during_search() {
+    glns::Instance inst;
+    inst.num_vertices = inst.num_sets = 8;
+    inst.dist = glns::Matrix(8, 10);
+    for (int v = 0; v < 8; ++v) {
+        inst.sets.push_back({v});
+        inst.dist.set(v, (v + 1) % 8, 0);
+    }
+    inst.finalize();
+    glns::Params params;
+    params.seed = 0;
+    params.trials = 1;
+    params.max_time = 0;
+    CHECK(glns::solve(inst, params).cost > 0);
+
+    params.max_time = 60;
+    const auto sol = glns::solve(inst, params);
+    CHECK(sol.cost == 0);
+    CHECK(feasible(inst, sol.tour));
+    CHECK(sol.total_iterations > 0);
+    CHECK(sol.total_iterations < 480);
+    CHECK(!sol.timeout);
+    CHECK(!sol.budget_met);
+}
+
+void test_output_error(const std::string& instance_dir, const std::string& output_dir) {
+    const glns::Instance inst = glns::read_instance(instance_dir + "/tiny.gtsp");
+    glns::Params params;
+    params.seed = 1;
+    params.trials = 1;
+    params.output_file = output_dir + "/missing/tour.txt";
+
+    bool rejected = false;
+    try {
+        (void)glns::solve(inst, params);
+    } catch (const std::runtime_error& e) {
+        rejected = std::string(e.what()).find("output file") != std::string::npos;
+    }
+    CHECK(rejected);
+}
+
+void test_output_file(const std::string& instance_dir, const std::string& output_dir) {
+    const glns::Instance inst = glns::read_instance(instance_dir + "/tiny.gtsp");
+    const std::string output = output_dir + "/glns-test-tour.txt";
+    glns::Params params;
+    params.seed = 1;
+    params.trials = 1;
+    params.output_file = output;
+    const glns::Solution sol = glns::solve(inst, params);
+
+    std::ifstream file(output);
+    const std::string contents((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+    CHECK(file.good() || file.eof());
+    CHECK(contents.find("Tour Cost        : " + std::to_string(sol.cost)) !=
+          std::string::npos);
+    CHECK(std::remove(output.c_str()) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "examples";
+    const std::string fixture_dir = argc > 2 ? argv[2] : "tests/fixtures";
+    const std::string output_dir = argc > 3 ? argv[3] : ".";
     test_parser(dir);
+    test_parser_rejections(fixture_dir);
+    test_parser_formats(fixture_dir);
     test_solver(dir);
+    test_invalid_instance();
+    test_invalid_parameters(dir);
+    test_zero_cost_optimum();
+    test_stopping_conditions();
+    test_terminating_iteration_count();
+    test_zero_cost_found_during_search();
+    test_output_error(dir, fixture_dir);
+    test_output_file(dir, output_dir);
     if (failures == 0) {
         std::printf("\nALL TESTS PASSED\n");
         return 0;

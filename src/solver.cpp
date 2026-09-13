@@ -4,6 +4,7 @@
 // Port of GLNS.jl: the main solver loop (simulated annealing over
 // adaptive removal-insertion moves, with warm and cold restarts).
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
@@ -25,7 +26,11 @@ double seconds_since(Clock::time_point start) {
 Solution solve(const Instance& instance, const Params& params) {
     using namespace detail;
 
-    if (static_cast<int>(instance.membership.size()) != instance.num_vertices) {
+    if (instance.num_vertices <= 0 || instance.num_sets <= 1 ||
+        instance.num_sets > instance.num_vertices ||
+        instance.dist.size() != instance.num_vertices ||
+        instance.sets.size() != static_cast<std::size_t>(instance.num_sets) ||
+        instance.membership.size() != static_cast<std::size_t>(instance.num_vertices)) {
         throw std::runtime_error("instance not finalized: call Instance::finalize() first");
     }
 
@@ -60,10 +65,38 @@ Solution solve(const Instance& instance, const Params& params) {
         return solution;
     };
 
+    auto stop_requested = [&](const Tour& best, double elapsed) {
+        const Cost best_cost = std::min(best.cost, lowest.cost);
+        timeout = elapsed >= config.max_time;
+        budget_met = best_cost <= config.budget;
+        // Nonnegative edge costs make zero a proof of global optimality.
+        return best_cost == 0 || budget_met || timeout;
+    };
+
+    auto finish = [&](const Tour& best, double elapsed) {
+        if (lowest.cost > best.cost) lowest = best;
+        print_best(count, config, best, lowest, elapsed, budget_met, timeout);
+        const double timer = seconds_since(init_time);
+        print_summary(lowest, timer, membership, config, timeout, budget_met);
+        return make_solution(lowest, timer);
+    };
+
     while (count.cold_trial <= config.cold_trials) {
+        if (count.cold_trial > 1) {
+            const double restart_elapsed = seconds_since(init_time);
+            if (stop_requested(lowest, restart_elapsed)) {
+                return finish(lowest, restart_elapsed);
+            }
+        }
         // build tour from scratch on a cold restart
         Tour best = initial_tour(lowest, dist, sets, setdist, count.cold_trial, config, rng);
         Phase phase = kEarly;
+
+        // Check even when the iteration threshold is too small to enter the loop.
+        const double initial_elapsed = seconds_since(init_time);
+        if (stop_requested(best, initial_elapsed)) {
+            return finish(best, initial_elapsed);
+        }
 
         if (count.cold_trial == 1) {
             powers = initialize_powers(config);
@@ -72,6 +105,10 @@ Solution solve(const Instance& instance, const Params& params) {
         }
 
         while (count.warm_trial <= config.warm_trials) {
+            const double restart_elapsed = seconds_since(init_time);
+            if (stop_requested(best, restart_elapsed)) {
+                return finish(best, restart_elapsed);
+            }
             std::int64_t iter_count = 1;
             current.tour = best.tour;
             current.cost = best.cost;
@@ -122,34 +159,33 @@ Solution solve(const Instance& instance, const Params& params) {
                     count.latest_improvement += 1;
                 }
 
-                // if we've come in under budget, or we're out of time, exit
+                // Count the completed iteration even when it triggers termination.
+                count.total_iter += 1;
                 const double elapsed = seconds_since(init_time);
-                if (best.cost <= config.budget || elapsed > config.max_time) {
-                    timeout = elapsed > config.max_time;
-                    budget_met = best.cost <= config.budget;
-                    if (lowest.cost > best.cost) lowest = best;
-                    print_best(count, config, best, lowest, elapsed, budget_met, timeout);
-                    const double timer = seconds_since(init_time);
-                    print_summary(lowest, timer, membership, config, timeout, budget_met);
-                    return make_solution(lowest, timer);
+                if (stop_requested(best, elapsed)) {
+                    return finish(best, elapsed);
                 }
 
                 temperature *= cooling_rate;  // cool the temperature
                 iter_count += 1;
-                count.total_iter += 1;
                 print_best(count, config, best, lowest, elapsed, budget_met, timeout);
             }
             print_warm_trial(count, config, best, iter_count);
-            count.warm_trial += 1;
             count.latest_improvement = 1;
             count.first_improvement = false;
+            // The configured limit may be INT_MAX; do not increment past it.
+            if (count.warm_trial == config.warm_trials) break;
+            count.warm_trial += 1;
         }
         if (lowest.cost > best.cost) lowest = best;
         count.warm_trial = 0;
+        // As above, keep the terminating counter within the int range.
+        if (count.cold_trial == config.cold_trials) break;
         count.cold_trial += 1;
     }
 
     const double timer = seconds_since(init_time);
+    stop_requested(lowest, timer);
     print_summary(lowest, timer, membership, config, timeout, budget_met);
     return make_solution(lowest, timer);
 }

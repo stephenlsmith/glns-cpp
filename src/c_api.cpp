@@ -4,9 +4,11 @@
 // C API wrapper around the C++ solver (see include/glns/glns.h).
 
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <stdexcept>
 #include <string>
 
 #include "glns/glns.h"
@@ -23,6 +25,15 @@ void write_error(char* errbuf, int errbuf_len, const char* message) {
 glns::Params to_cpp_params(const glns_params* p) {
     glns::Params params;
     if (p == nullptr) return params;
+    if (!std::isfinite(p->max_time)) {
+        throw std::runtime_error("max_time must be finite");
+    }
+    if (!std::isfinite(p->reopt)) {
+        throw std::runtime_error("reopt must be finite");
+    }
+    if (!std::isfinite(p->epsilon)) {
+        throw std::runtime_error("epsilon must be finite");
+    }
     if (p->mode != nullptr) params.mode = p->mode;
     if (p->trials >= 0) params.trials = p->trials;
     if (p->restarts >= 0) params.restarts = p->restarts;
@@ -32,6 +43,8 @@ glns::Params to_cpp_params(const glns_params* p) {
     if (p->epsilon >= 0) params.epsilon = p->epsilon;
     if (p->init_tour != nullptr) params.init_tour = p->init_tour;
     if (p->noise != nullptr) params.noise = p->noise;
+    if (p->insertion_algs != nullptr) params.insertion_algs = p->insertion_algs;
+    if (p->removal_algs != nullptr) params.removal_algs = p->removal_algs;
     if (p->budget != INT64_MIN) params.budget = p->budget;
     if (p->has_seed != 0) params.seed = p->seed;
     params.verbose = p->verbose;
@@ -41,13 +54,14 @@ glns::Params to_cpp_params(const glns_params* p) {
 
 int fill_solution(const glns::Solution& sol, glns_solution* out, char* errbuf,
                   int errbuf_len) {
-    out->tour_len = static_cast<int>(sol.tour.size());
-    out->tour = static_cast<int*>(std::malloc(sizeof(int) * sol.tour.size()));
-    if (out->tour == nullptr) {
+    int* tour = static_cast<int*>(std::malloc(sizeof(int) * sol.tour.size()));
+    if (tour == nullptr) {
         write_error(errbuf, errbuf_len, "out of memory");
         return 2;
     }
-    std::memcpy(out->tour, sol.tour.data(), sizeof(int) * sol.tour.size());
+    std::memcpy(tour, sol.tour.data(), sizeof(int) * sol.tour.size());
+    out->tour = tour;
+    out->tour_len = static_cast<int>(sol.tour.size());
     out->cost = sol.cost;
     out->solve_time = sol.solve_time;
     out->timeout = sol.timeout ? 1 : 0;
@@ -60,7 +74,10 @@ int fill_solution(const glns::Solution& sol, glns_solution* out, char* errbuf,
 
 extern "C" {
 
+const char* glns_version(void) { return GLNS_VERSION_STRING; }
+
 void glns_params_init(glns_params* params) {
+    if (params == nullptr) return;
     params->mode = nullptr;
     params->trials = -1;
     params->restarts = -1;
@@ -70,6 +87,8 @@ void glns_params_init(glns_params* params) {
     params->epsilon = -1.0;
     params->init_tour = nullptr;
     params->noise = nullptr;
+    params->insertion_algs = nullptr;
+    params->removal_algs = nullptr;
     params->budget = INT64_MIN;
     params->seed = 0;
     params->has_seed = 0;
@@ -81,12 +100,20 @@ int glns_solve(int num_vertices, int num_sets, const int64_t* dist,
                const int* set_sizes, const int* set_vertices,
                const glns_params* params, glns_solution* solution,
                char* errbuf, int errbuf_len) {
+    if (solution != nullptr) *solution = glns_solution{};
+    write_error(errbuf, errbuf_len, "");
     if (dist == nullptr || set_sizes == nullptr || set_vertices == nullptr ||
         solution == nullptr) {
         write_error(errbuf, errbuf_len, "null argument");
         return 1;
     }
     try {
+        if (num_vertices <= 0) {
+            throw std::runtime_error("num_vertices must be positive");
+        }
+        if (num_sets <= 1) {
+            throw std::runtime_error("num_sets must be greater than 1");
+        }
         glns::Instance inst;
         inst.num_vertices = num_vertices;
         inst.num_sets = num_sets;
@@ -98,9 +125,20 @@ int glns_solve(int num_vertices, int num_sets, const int64_t* dist,
         }
         inst.sets.resize(num_sets);
         const int* v = set_vertices;
+        int total_vertices = 0;
         for (int s = 0; s < num_sets; ++s) {
+            if (set_sizes[s] <= 0) {
+                throw std::runtime_error("set size must be positive");
+            }
+            if (set_sizes[s] > num_vertices - total_vertices) {
+                throw std::runtime_error("set sizes exceed num_vertices");
+            }
             inst.sets[s].assign(v, v + set_sizes[s]);
             v += set_sizes[s];
+            total_vertices += set_sizes[s];
+        }
+        if (total_vertices != num_vertices) {
+            throw std::runtime_error("set sizes do not sum to num_vertices");
         }
         inst.finalize();
         return fill_solution(glns::solve(inst, to_cpp_params(params)), solution, errbuf,
@@ -113,6 +151,8 @@ int glns_solve(int num_vertices, int num_sets, const int64_t* dist,
 
 int glns_solve_file(const char* path, const glns_params* params, glns_solution* solution,
                     char* errbuf, int errbuf_len) {
+    if (solution != nullptr) *solution = glns_solution{};
+    write_error(errbuf, errbuf_len, "");
     if (path == nullptr || solution == nullptr) {
         write_error(errbuf, errbuf_len, "null argument");
         return 1;
@@ -130,8 +170,7 @@ int glns_solve_file(const char* path, const glns_params* params, glns_solution* 
 void glns_solution_free(glns_solution* solution) {
     if (solution != nullptr) {
         std::free(solution->tour);
-        solution->tour = nullptr;
-        solution->tour_len = 0;
+        *solution = glns_solution{};
     }
 }
 

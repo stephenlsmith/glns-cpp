@@ -11,14 +11,27 @@
 namespace glns {
 
 std::int32_t Matrix::checked(Cost value) {
-    if (value > std::numeric_limits<std::int32_t>::max() ||
-        value < std::numeric_limits<std::int32_t>::min()) {
+    if (value < 0) {
+        throw std::runtime_error(
+            "distance " + std::to_string(value) +
+            " is negative; GLNS requires nonnegative edge costs");
+    }
+    if (value > std::numeric_limits<std::int32_t>::max()) {
         throw std::runtime_error(
             "distance " + std::to_string(value) +
             " does not fit in 32 bits; scale the costs down (tour costs may "
             "exceed 32 bits, individual distances may not)");
     }
     return static_cast<std::int32_t>(value);
+}
+
+std::size_t Matrix::checked_size(int n) {
+    if (n <= 0) throw std::runtime_error("matrix dimension must be positive");
+    const std::size_t size = static_cast<std::size_t>(n);
+    if (size > std::numeric_limits<std::size_t>::max() / size) {
+        throw std::runtime_error("matrix dimension is too large");
+    }
+    return size * size;
 }
 
 void Instance::finalize() {
@@ -33,6 +46,9 @@ void Instance::finalize() {
     }
     membership.assign(num_vertices, -1);
     for (std::size_t s = 0; s < sets.size(); ++s) {
+        if (sets[s].empty()) {
+            throw std::runtime_error("set " + std::to_string(s) + " is empty");
+        }
         for (int v : sets[s]) {
             if (v < 0 || v >= num_vertices) {
                 throw std::runtime_error("vertex " + std::to_string(v) + " out of range");

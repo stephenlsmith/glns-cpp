@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <random>
 #include <stdexcept>
+#include <string_view>
 
 #include "internal.hpp"
 
@@ -23,15 +25,72 @@ std::string basename_of(const std::string& path) {
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
+void validate_choice(std::string_view name, const std::string& value,
+                     std::initializer_list<std::string_view> choices) {
+    for (std::string_view choice : choices) {
+        if (value == choice) return;
+    }
+    throw std::runtime_error(std::string(name) + " not recognized: " + value);
+}
+
+void validate_probability(std::string_view name, const std::optional<double>& value) {
+    if (value && (!std::isfinite(*value) || *value < 0.0 || *value > 1.0)) {
+        throw std::runtime_error(std::string(name) + " must be finite and in [0, 1]");
+    }
+}
+
+std::int64_t scaled_iterations(std::int64_t per_set, int num_sets) {
+    if (per_set <= 0) throw std::runtime_error("num_iterations must be positive");
+    if (per_set > std::numeric_limits<std::int64_t>::max() / num_sets) {
+        throw std::runtime_error("num_iterations is too large");
+    }
+    return per_set * num_sets;
+}
+
+void validate_parameters(const Params& params) {
+    validate_choice("mode", params.mode, {"default", "fast", "slow"});
+    if (params.trials && *params.trials <= 0) {
+        throw std::runtime_error("trials must be positive");
+    }
+    if (params.restarts && *params.restarts < 0) {
+        throw std::runtime_error("restarts must be nonnegative");
+    }
+    if (params.max_time && (!std::isfinite(*params.max_time) || *params.max_time < 0.0)) {
+        throw std::runtime_error("max_time must be finite and nonnegative");
+    }
+    if (params.num_iterations && *params.num_iterations <= 0) {
+        throw std::runtime_error("num_iterations must be positive");
+    }
+    validate_probability("reopt", params.reopt);
+    validate_probability("epsilon", params.epsilon);
+    if (params.verbose < 0 || params.verbose > 3) {
+        throw std::runtime_error("verbose must be in [0, 3]");
+    }
+    if (params.init_tour) {
+        validate_choice("init_tour", *params.init_tour, {"rand", "insertion"});
+    }
+    if (params.noise) {
+        validate_choice("noise", *params.noise, {"None", "Add", "Subset", "Both"});
+    }
+    if (params.insertion_algs) {
+        validate_choice("insertion_algs", *params.insertion_algs,
+                        {"default", "cheapest", "randpdf", "classic"});
+    }
+    if (params.removal_algs) {
+        validate_choice("removal_algs", *params.removal_algs, {"default", "classic"});
+    }
+}
+
 }  // namespace
 
 Config resolve_parameters(const Instance& inst, const Params& params) {
     const int num_sets = inst.num_sets;
+    validate_parameters(params);
     Config c;
     c.mode = params.mode;
 
     if (params.mode == "default") {
-        c.num_iterations = params.num_iterations.value_or(60) * num_sets;
+        c.num_iterations = scaled_iterations(params.num_iterations.value_or(60), num_sets);
         c.cold_trials = params.trials.value_or(5);
         c.warm_trials = params.restarts.value_or(3);
         c.max_time = params.max_time.value_or(360);
@@ -43,7 +102,7 @@ Config resolve_parameters(const Instance& inst, const Params& params) {
             std::min<std::int64_t>(100, std::max<std::int64_t>(round_int(0.3 * num_sets), 1)));
         c.insertions = {"randpdf", "cheapest"};
     } else if (params.mode == "fast") {
-        c.num_iterations = params.num_iterations.value_or(60) * num_sets;
+        c.num_iterations = scaled_iterations(params.num_iterations.value_or(60), num_sets);
         c.cold_trials = params.trials.value_or(3);
         c.warm_trials = params.restarts.value_or(2);
         c.max_time = params.max_time.value_or(300);
@@ -55,7 +114,7 @@ Config resolve_parameters(const Instance& inst, const Params& params) {
             std::min<std::int64_t>(20, std::max<std::int64_t>(round_int(0.1 * num_sets), 1)));
         c.insertions = {"randpdf"};
     } else if (params.mode == "slow") {
-        c.num_iterations = params.num_iterations.value_or(150) * num_sets;
+        c.num_iterations = scaled_iterations(params.num_iterations.value_or(150), num_sets);
         c.cold_trials = params.trials.value_or(10);
         c.warm_trials = params.restarts.value_or(5);
         c.max_time = params.max_time.value_or(1200);
@@ -66,8 +125,6 @@ Config resolve_parameters(const Instance& inst, const Params& params) {
         c.max_removals =
             static_cast<int>(std::max<std::int64_t>(round_int(0.4 * num_sets), 1));
         c.insertions = {"randpdf", "cheapest"};
-    } else {
-        throw std::runtime_error("mode not recognized.  Use default, fast, or slow");
     }
 
     c.accept_percentage = 0.05;

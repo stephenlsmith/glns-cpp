@@ -7,10 +7,10 @@ implementation is written in Julia and lives at
 information on the solver is available at
 <https://ece.uwaterloo.ca/~sl2smith/GLNS/>.
 
-**Status: work in progress.** The core solver, command-line interface,
-C API, and Python bindings are complete; the solver is validated against the
-Julia implementation on the GTSPLIB benchmark set (see `docs/`). Prebuilt
-wheels and CI are planned.
+**Status: pre-release.** The core solver, command-line interface, C API, and
+Python bindings are complete; the solver has been compared against the Julia
+implementation on the GTSPLIB benchmark set (see `docs/`). Cross-platform CI
+is configured; prebuilt wheels are planned.
 
 ## Citing this work
 
@@ -38,6 +38,19 @@ Requires a C++17 compiler. With CMake:
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build
+```
+
+To install the C/C++ library, headers, CLI, and CMake package:
+
+```bash
+cmake --install build --prefix /path/to/prefix
+```
+
+Downstream CMake projects can then use:
+
+```cmake
+find_package(glns 0.1 CONFIG REQUIRED)
+target_link_libraries(my_target PRIVATE glns::core)
 ```
 
 Or directly, without CMake:
@@ -99,6 +112,7 @@ compiler; published wheels will remove this requirement):
 
 ```bash
 pip install .
+# or: uv pip install .
 ```
 
 ```python
@@ -120,7 +134,14 @@ sol.solve_time  # seconds; the GIL is released while solving
 All solver options (`mode`, `trials`, `restarts`, `max_time`,
 `num_iterations`, `budget`, `seed`, `verbose`, ...) are keyword arguments
 with the same defaults as the Julia implementation. Costs must be integers;
-scale and round floating-point costs first.
+scale and round floating-point costs first. Individual edge costs must be
+nonnegative.
+
+Vertex IDs must be integers, including when supplied through Python. Timeout
+and cost-budget limits are checked after the initial feasible tour is built,
+at restart boundaries, and after each search iteration. Thus `max_time=0`
+returns an initial tour with zero search iterations. A zero-cost tour stops
+the search immediately because all edge costs are nonnegative.
 
 ## C API
 
@@ -142,21 +163,29 @@ if (glns_solve(n, m, dist, set_sizes, set_vertices, &params,
 }
 ```
 
+The C header exposes `GLNS_VERSION_*` macros and `glns_version()` for runtime
+version checks. As this is a pre-1.0 release, the C and C++ APIs and ABIs may
+still change between minor versions.
+
 ## Relation to the Julia implementation
 
 This is a faithful port: the algorithm, parameter defaults, and GTSPLIB
 parser follow the Julia code (the file layout of `src/` mirrors the Julia
 sources). Because GLNS is a stochastic anytime algorithm, individual runs
-differ, but solution-quality distributions match the Julia implementation.
+differ. In the three-run comparison reported in `docs/`, the two
+implementations produced comparable solution quality across GTSPLIB.
 Known intentional deviations:
 
 - The library API is silent by default (`verbose = 0`) and returns the tour
   in memory; the Julia default prints a progress bar and summary. The CLI
   keeps the Julia behavior (`-verbose=3`).
 - An RNG seed can be supplied for reproducible runs.
+- Input validation rejects incomplete distance data and malformed options.
+  Stopping checks also cover initialization and restarts, and a zero-cost
+  optimum ends the search immediately.
 - The `LOWER_ROW` edge weight format is implemented correctly rather than
   ported from the (untested and broken) Julia branch.
-- Individual distances must fit in 32 bits (they are stored narrow to halve
+- Individual distances must be nonnegative and fit in 32 bits (they are stored narrow to halve
   the solver's cache footprint; arithmetic and tour costs are still 64-bit).
   `Matrix::set` throws a clear error if a distance is out of range.
 
