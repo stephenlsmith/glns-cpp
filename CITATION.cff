@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use GLNS, please cite the associated journal article."
+title: "GLNS: An Effective Large Neighborhood Search Solver for the Generalized Traveling Salesman Problem"
+type: software
+authors:
+  - family-names: Smith
+    given-names: Stephen L.
+    email: stephen.smith@uwaterloo.ca
+  - family-names: Imeson
+    given-names: Frank
+version: 0.1.0
+license: Apache-2.0
+url: "https://ece.uwaterloo.ca/~sl2smith/GLNS/"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Smith
+      given-names: Stephen L.
+    - family-names: Imeson
+      given-names: Frank
+  title: "GLNS: An Effective Large Neighborhood Search Heuristic for the Generalized Traveling Salesman Problem"
+  journal: "Computers & Operations Research"
+  volume: 87
+  start: 1
+  end: 19
+  year: 2017
+  doi: 10.1016/j.cor.2017.05.010
