@@ -403,6 +403,7 @@ void test_output_file(const std::string& instance_dir, const std::string& output
     CHECK(file.good() || file.eof());
     CHECK(contents.find("Tour Cost        : " + std::to_string(sol.cost)) !=
           std::string::npos);
+    file.close();  // Windows requires the read handle to be closed before deletion.
     CHECK(std::remove(output.c_str()) == 0);
 }
 
