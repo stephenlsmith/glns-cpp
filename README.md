@@ -331,9 +331,11 @@ AI assistance.
 
 The algorithm and mode defaults follow
 [GLNS.jl](https://github.com/stephenlsmith/GLNS.jl). Individual stochastic
-runs differ. The [benchmark comparison](docs/benchmark-2026-07-07.md)
-reports comparable solution quality across GTSPLIB in three runs per
-implementation, together with parser parity and timing results.
+runs differ. The [benchmark comparison](docs/benchmark-2026-09-14.md)
+uses ten runs per implementation on each of 45 GTSPLIB instances. It found
+comparable solution quality and 21% less total solver time for C++, with
+lower mean runtimes on all 45 instances on the benchmark machine. The
+report includes per-instance results, validation, and reproduction tools.
 
 The C++ version adds library interfaces, seed control, stricter input
 validation, and stopping checks at initialization and restart boundaries.
