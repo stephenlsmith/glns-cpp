@@ -66,7 +66,13 @@ ctest -C Release --output-on-failure
 cd ..
 ```
 
-For Python, use Python 3.9 or newer and install from the repository root:
+For Python, use Python 3.9 or newer. Install directly from GitHub:
+
+```bash
+python -m pip install "git+https://github.com/stephenlsmith/glns-cpp.git@v0.1.0"
+```
+
+Or, from a clone of the repository, run from its root:
 
 ```bash
 python -m pip install .
@@ -172,7 +178,9 @@ C++ and Julia random-number streams.
 
 ### Calling from Python
 
-Solve an instance from a file:
+Solve an instance from a file. The example instances are in the
+repository's [examples/](examples/) directory, not in the installed
+package, so run this from a clone or adjust the path:
 
 ```python
 import glns
