@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.18)
+project(glns_benchmark LANGUAGES CXX)
+add_subdirectory(../.. glns)
+add_executable(glns_benchmark_worker worker.cpp)
+target_link_libraries(glns_benchmark_worker PRIVATE glns::core)

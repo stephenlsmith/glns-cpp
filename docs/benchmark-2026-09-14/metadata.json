@@ -1,0 +1,47 @@
+{
+  "started_utc": "2026-09-14T17:27:19.306275+00:00",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "Apple M4 Pro; 14 cores (10 performance, 4 efficiency); 24 GiB RAM; AC power",
+  "cpp_build": "AppleClang 21.0.0 (clang-2100.1.1.101); CMake 4.4.3 Release; -O3 -DNDEBUG -std=c++17 -fPIC -ffp-contract=off",
+  "python": "3.9.6",
+  "julia": "julia version 1.12.7",
+  "cpp_commit": "768dd12b7a1e0c6580633ace20ddf80fb01e6f79",
+  "julia_commit": "1980c3c59d3625a34c10d183d5da5de9b2d63294",
+  "cpp_sources_sha256": "267ea3b3c9c4ba873e787e6971f2e1ba89b19e563737c9fe46870e7f99419f8f",
+  "julia_sources_sha256": "0f7218afe22cd9ce36fe58fe447d0283d9b92f8a466c93703b7daf319c525dd9",
+  "cpp_worker_sha256": "1d210603977698f520f51657f47e755d438c0940bdd3a87a9c1b54fabe59a7d8",
+  "adapter_sha256": {
+    "worker.cpp": "9329e441ae7c15788be3403883d2ed327067741bb24a1e0ef8db2ad5e5a6d837",
+    "worker.jl": "133eb9bc97694017a9d1f7981cd3ac22857ac753bc427b89d551b0eefe4108db",
+    "run.py": "51f2f6750b0932c8b823568d04df8a40706305288403a2afc30af5408ffc200c"
+  },
+  "reference_csv_sha256": "3fbb363ecc361e8169c9f2c958e9c244f2c67de232791e3b0753520b9f7bfcb7",
+  "runs_per_solver_instance": 10,
+  "instance_count": 45,
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "schedule_seed": 20260914,
+  "settings": {
+    "mode": "default",
+    "trials": 5,
+    "restarts": 3,
+    "num_iterations_per_set": 60,
+    "max_time": 360,
+    "budget": null
+  },
+  "timing": "Single active solver, persistent workers; parse all instances and warm each solver before measurement; full Julia GC before each call. solver_seconds excludes parsing/startup/output; call_seconds includes parsing and the solver call, excludes process startup and validation.",
+  "measured_wall_seconds": 2609.4960942909997,
+  "finished_utc": "2026-09-14T18:10:53.064052+00:00",
+  "total_wall_seconds": 2613.740631959,
+  "complete": true
+}

@@ -1,0 +1,36 @@
+{
+  "instances": 45,
+  "runs_per_solver": 450,
+  "julia": {
+    "mean_gap_percent": 0.04813052193885595,
+    "median_instance_mean_gap_percent": 0.0,
+    "total_seconds": 1437.4396325169985,
+    "total_call_seconds": 1453.7184282529981,
+    "best_known_hits": 339,
+    "instances_with_hit": 42,
+    "instances_all_hits": 28,
+    "timeouts": 0,
+    "budget_stops": 0
+  },
+  "cpp": {
+    "mean_gap_percent": 0.043502407735857083,
+    "median_instance_mean_gap_percent": 0.0,
+    "total_seconds": 1135.7315780589988,
+    "total_call_seconds": 1136.9180561249998,
+    "best_known_hits": 355,
+    "instances_with_hit": 43,
+    "instances_all_hits": 28,
+    "timeouts": 0,
+    "budget_stops": 0
+  },
+  "total_time_speedup": 1.265650845927546,
+  "total_call_speedup": 1.2786483778855275,
+  "geometric_mean_speedup": 1.3692799894722403,
+  "median_speedup": 1.3432101076455185,
+  "cpp_faster_instances": 45,
+  "quality_wins": {
+    "julia": 5,
+    "cpp": 10,
+    "ties": 30
+  }
+}
