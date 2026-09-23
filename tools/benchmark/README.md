@@ -14,8 +14,9 @@ GLNS.jl checkout and a GTSPLIB directory containing the desired `.gtsp`
 files at its top level.
 The original `benchmark-results.csv` or the saved `reference.csv` supplies
 the reference best-known costs; its first two columns must be instance name
-and integer cost. The GTSPLIB instance files are external inputs and are not
-bundled with the C++ repository.
+and integer cost. The GTSPLIB instance files are not bundled with the C++
+repository; they are linked from the
+[GLNS web page](https://ece.uwaterloo.ca/~sl2smith/GLNS/).
 
 From the C++ repository root:
 
@@ -24,7 +25,7 @@ cmake -S tools/benchmark -B build/benchmark -DCMAKE_BUILD_TYPE=Release
 cmake --build build/benchmark --config Release --parallel
 python3 tools/benchmark/run.py \
   --julia-repo ../GLNS.jl \
-  --instances ../GLNS.jl/benchmark/GTSPLIB \
+  --instances ../GTSPLIB \
   --best-known docs/benchmark-2026-09-14/reference.csv \
   --cpp-worker build/benchmark/glns_benchmark_worker \
   --output benchmark-results \

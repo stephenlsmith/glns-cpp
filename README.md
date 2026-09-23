@@ -13,8 +13,10 @@ defaults. It can be used independently of Julia.
 More information on the solver is given at
 <https://ece.uwaterloo.ca/~sl2smith/GLNS/>.
 
-Version 0.1.0 is in preparation. The installation instructions below build
-from source; see the [changelog](CHANGELOG.md) for release notes.
+The current release is version 0.1.0. The installation instructions below
+build from source; see the [changelog](CHANGELOG.md) for release notes.
+The Julia implementation remains the reference implementation; this C++
+port is maintained on a best-effort basis.
 
 ## Citing this work
 

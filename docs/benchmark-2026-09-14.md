@@ -145,15 +145,17 @@ contains best costs, timing standard deviations, and median times.
 ## Reproduction and raw data
 
 The [benchmark tools](../tools/benchmark/README.md) document the complete
-procedure. With the reference Julia checkout and the 45 GTSPLIB instance
-files available, run from the C++ repository root:
+procedure. The GTSPLIB instances are linked from the
+[GLNS web page](https://ece.uwaterloo.ca/~sl2smith/GLNS/). With the
+reference Julia checkout and the 45 instance files in a local `GTSPLIB`
+directory, run from the C++ repository root:
 
 ```bash
 cmake -S tools/benchmark -B build/benchmark -DCMAKE_BUILD_TYPE=Release
 cmake --build build/benchmark --config Release --parallel
 python3 tools/benchmark/run.py \
   --julia-repo ../GLNS.jl \
-  --instances ../GLNS.jl/benchmark/GTSPLIB \
+  --instances ../GTSPLIB \
   --best-known docs/benchmark-2026-09-14/reference.csv \
   --cpp-worker build/benchmark/glns_benchmark_worker \
   --output benchmark-results \
@@ -165,7 +167,7 @@ python3 tools/benchmark/summarize.py benchmark-results
 
 Use a fresh output directory. With a multi-configuration generator, the
 worker is typically in `build/benchmark/Release/`. GTSPLIB input files are
-external to this repository; their names and SHA-256 hashes are recorded
+not bundled with this repository; their names and SHA-256 hashes are recorded
 in the manifest so that the same inputs can be identified.
 
 - [All 900 runs](benchmark-2026-09-14/runs.csv): seeds, costs, timings,
